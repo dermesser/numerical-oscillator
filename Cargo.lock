@@ -46,6 +46,7 @@ version = "0.1.0"
 dependencies = [
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "plotlib 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "svg 0.5.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

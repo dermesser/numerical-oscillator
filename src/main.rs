@@ -1,5 +1,15 @@
 use clap::{App, Arg};
-use plotlib::scatter::Scatter;
+
+use plotlib;
+use plotlib::scatter::{Scatter, Style};
+use plotlib::style::Point;
+use plotlib::view::View;
+
+use svg;
+
+use std::f64;
+use std::fs;
+use std::io;
 use std::vec::Vec;
 
 #[derive(Clone)]
@@ -30,14 +40,15 @@ impl CollectedData {
         self.v.push(s.v);
         self.a.push(s.a);
     }
-    fn print_phase_tsv<W: std::io::Write>(&self, w: &mut W) {
+    fn print_phase_tsv<W: io::Write>(&self, w: &mut W) {
         let mut t: f64 = 0.;
         for i in 0..self.x.len() {
             write!(
                 w,
                 "{:.3}\t{:.3}\t{:.3}\t{:.3}\n",
                 t, self.x[i], self.v[i], self.a[i]
-            );
+            )
+            .unwrap();
             t += self.step;
         }
     }
@@ -82,11 +93,41 @@ impl SolverIterator for VDP {
 fn drive<S: SolverIterator>(it: &S, step: f64, rounds: usize) -> CollectedData {
     let mut collected = CollectedData::new(rounds, step);
     let mut current = it.initial();
-    for i in 1..rounds {
+    for _ in 1..rounds {
         collected.add(&current);
         current = it.next(current, step);
     }
     return collected;
+}
+
+fn render_phasespace(cd: CollectedData, dst: &str) -> io::Result<()> {
+    let (xmin, xmax) = cd.x.iter().fold((f64::MAX, f64::MIN), |(min, max), x| {
+        (
+            if *x < min { *x } else { min },
+            if *x > max { *x } else { max },
+        )
+    });
+    let (ymin, ymax) = cd.v.iter().fold((f64::MAX, f64::MIN), |(min, max), x| {
+        (
+            if *x < min { *x } else { min },
+            if *x > max { *x } else { max },
+        )
+    });
+    println!("x: {:?} v: {:?}", (xmin, xmax), (ymin, ymax));
+
+    let x = cd.x.into_iter();
+    let v = cd.v.into_iter();
+    let zipped: Vec<(f64, f64)> = x.zip(v).collect();
+    let scatter = Scatter::from_vec(&zipped).style(Style::new().colour("#FF0000").size(1.));
+
+    let group = View::new()
+        .add(&scatter)
+        .x_range(xmin, xmax)
+        .y_range(ymin, ymax)
+        .x_label("X")
+        .y_label("V");
+    plotlib::page::Page::single(&group).save(dst);
+    Ok(())
 }
 
 fn getarg<T: std::str::FromStr + std::string::ToString>(
@@ -123,10 +164,16 @@ fn main() {
                 .help("time span to calculate"),
         )
         .arg(
-            Arg::with_name("out")
-                .long("out")
+            Arg::with_name("out-phase")
+                .long("out-phase")
                 .takes_value(true)
-                .help("output file"),
+                .help("output file for phase space"),
+        )
+        .arg(
+            Arg::with_name("out-xvt")
+                .long("out-xvt")
+                .takes_value(true)
+                .help("output file for x-v-t diagram"),
         )
         .arg(Arg::with_name("x0").long("x0").takes_value(true))
         .arg(Arg::with_name("v0").long("v0").takes_value(true))
@@ -135,9 +182,7 @@ fn main() {
         .arg(Arg::with_name("a").long("a").takes_value(true))
         .get_matches();
 
-    let typ = matches.value_of("type").unwrap_or("vdp");
-    let step = matches.value_of("step").unwrap_or("0.001");
-    let out = matches.value_of("out").unwrap_or("oscillator.png");
+    let typ = getarg(&matches, "type", "vdp".to_string());
     let time = getarg(&matches, "time", 0.5);
     let step = getarg(&matches, "step", 0.001);
     let rounds = (time / step) as usize;
@@ -150,6 +195,22 @@ fn main() {
             a: getarg(&matches, "a", 3.),
             omega0: getarg(&matches, "omega0", 20.),
         };
-        drive(&vdp, step, rounds).print_phase_tsv(&mut std::io::stdout());
+        let data = drive(&vdp, step, rounds);
+        let out = getarg(&matches, "out-phase", "".to_string());
+        if !out.is_empty() && out.ends_with("svg") {
+            render_phasespace(data, &out).unwrap();
+        } else if !out.is_empty() && out.ends_with("dat") {
+            let mut file = fs::OpenOptions::new()
+                .truncate(true)
+                .write(true)
+                .create(true)
+                .open(out)
+                .unwrap();
+            data.print_phase_tsv(&mut file);
+        } else {
+            println!("Specify --out-phase to render the phase space");
+        }
+    } else {
+        unimplemented!()
     }
 }

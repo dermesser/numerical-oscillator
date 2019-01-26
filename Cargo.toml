@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 plotlib = "0.3"
 clap = "2.32"
+svg = "0.5"
