@@ -14,6 +14,7 @@ use std::vec::Vec;
 
 #[derive(Clone)]
 struct State {
+    t: f64,
     x: f64,
     v: f64,
     a: f64,
@@ -71,6 +72,7 @@ struct VDP {
 impl SolverIterator for VDP {
     fn initial(&self) -> State {
         return State {
+            t: 0.,
             x: self.x0,
             v: self.v0,
             a: -self.eta * (self.x0 * self.x0 - self.a * self.a) * self.v0
@@ -83,6 +85,7 @@ impl SolverIterator for VDP {
         let a_next = -self.eta * (x_next * x_next - self.a * self.a) * v_next
             - self.omega0 * self.omega0 * x_next;
         return State {
+            t: s.t + step,
             x: x_next,
             v: v_next,
             a: a_next,
@@ -100,6 +103,7 @@ struct NormalizedVDP {
 impl SolverIterator for NormalizedVDP {
     fn initial(&self) -> State {
         return State {
+            t: 0.,
             x: self.x0,
             v: self.v0,
             a: self.epsilon * (1. - self.x0 * self.x0) * self.v0 - self.x0,
@@ -110,6 +114,43 @@ impl SolverIterator for NormalizedVDP {
         let v_next = s.v + s.a * step;
         let a_next = self.epsilon * (1. - x_next * x_next) * v_next - x_next;
         return State {
+            t: s.t + step,
+            x: x_next,
+            v: v_next,
+            a: a_next,
+        };
+    }
+}
+
+// Chaotic mathematical pendulum:
+// d^2/dt^2 phi + 2 gamma d/dt phi + g/R sin(phi) = h0 cos(omega * t)
+struct ChaoticDrivenPendulum {
+    phi0: f64,
+    vphi0: f64,
+    r: f64,
+    g: f64,
+    h0: f64,
+    gamma: f64,
+    omega: f64,
+}
+
+impl SolverIterator for ChaoticDrivenPendulum {
+    fn initial(&self) -> State {
+        return State {
+            t: 0.,
+            x: self.phi0,
+            v: self.vphi0,
+            a: self.h0 * 1. - 2. * self.gamma * self.vphi0 - self.g / self.r * self.phi0.sin(),
+        };
+    }
+    fn next(&self, s: State, step: f64) -> State {
+        let x_next = s.x + s.v * step + 0.5 * s.a * step * step;
+        let v_next = s.v + s.a * step;
+        let a_next = self.h0 * (self.omega * s.t).cos()
+            - 2. * self.gamma * v_next
+            - self.g / self.r * x_next.sin();
+        return State {
+            t: s.t + step,
             x: x_next,
             v: v_next,
             a: a_next,
@@ -176,7 +217,7 @@ fn main() {
             Arg::with_name("type")
                 .long("type")
                 .takes_value(true)
-                .help("vdp (van-der-pol, with x0 v0 eta a omega0) or nvdp (normalized van-der-pol, with epsilon x0 v0)"),
+                .help("vdp (van-der-pol, with x0 v0 eta a omega0) or nvdp (normalized van-der-pol, with epsilon x0 v0) or chaoticpendulum (with x0 = phi0, v0 = d/dt phi, r, g, h0 = F/m, gamma, omega)"),
         )
         .arg(
             Arg::with_name("step")
@@ -202,12 +243,17 @@ fn main() {
                 .takes_value(true)
                 .help("output file for x-v-t diagram"),
         )
-        .arg(Arg::with_name("x0").long("x0").takes_value(true))
-        .arg(Arg::with_name("v0").long("v0").takes_value(true))
-        .arg(Arg::with_name("omega0").long("omega0").takes_value(true))
-        .arg(Arg::with_name("eta").long("eta").takes_value(true))
         .arg(Arg::with_name("a").long("a").takes_value(true))
         .arg(Arg::with_name("epsilon").long("epsilon").takes_value(true))
+        .arg(Arg::with_name("eta").long("eta").takes_value(true))
+        .arg(Arg::with_name("g").long("g").takes_value(true))
+        .arg(Arg::with_name("gamma").long("gamma").takes_value(true))
+        .arg(Arg::with_name("h0").long("h0").takes_value(true))
+        .arg(Arg::with_name("omega").long("omega").takes_value(true))
+        .arg(Arg::with_name("omega0").long("omega0").takes_value(true))
+        .arg(Arg::with_name("r").long("r").takes_value(true))
+        .arg(Arg::with_name("v0").long("v0").takes_value(true))
+        .arg(Arg::with_name("x0").long("x0").takes_value(true))
         .get_matches();
 
     let typ = getarg(&matches, "type", "vdp".to_string());
@@ -232,6 +278,17 @@ fn main() {
             epsilon: getarg(&matches, "epsilon", 0.),
         };
         data = drive(&nvdp, step, rounds);
+    } else if typ == "chaoticpendulum" {
+        let cdp = ChaoticDrivenPendulum{
+            phi0: getarg(&matches, "x0", 0.1),
+            vphi0: getarg(&matches, "v0", 0.),
+            r: getarg(&matches, "r", 1.),
+            g: getarg(&matches, "g", 9.81),
+            h0: getarg(&matches, "h0", 1.0),
+            gamma: getarg(&matches, "gamma", 0.1),
+            omega: getarg(&matches, "omega", 1.),
+        };
+        data = drive(&cdp, step, rounds);
     } else {
         unimplemented!()
     }
