@@ -90,6 +90,33 @@ impl SolverIterator for VDP {
     }
 }
 
+// Van der Pol oscillator in standard form d^2/dt^2 x + epsilon (1-x^2) d/dt x + x = 0.
+struct NormalizedVDP {
+    x0: f64,
+    v0: f64,
+    epsilon: f64,
+}
+
+impl SolverIterator for NormalizedVDP {
+    fn initial(&self) -> State {
+        return State {
+            x: self.x0,
+            v: self.v0,
+            a: self.epsilon * (1. - self.x0 * self.x0) * self.v0 - self.x0,
+        };
+    }
+    fn next(&self, s: State, step: f64) -> State {
+        let x_next = s.x + s.v * step + 0.5 * s.a * step * step;
+        let v_next = s.v + s.a * step;
+        let a_next = self.epsilon * (1. - x_next * x_next) * v_next - x_next;
+        return State {
+            x: x_next,
+            v: v_next,
+            a: a_next,
+        };
+    }
+}
+
 fn drive<S: SolverIterator>(it: &S, step: f64, rounds: usize) -> CollectedData {
     let mut collected = CollectedData::new(rounds, step);
     let mut current = it.initial();
@@ -149,7 +176,7 @@ fn main() {
             Arg::with_name("type")
                 .long("type")
                 .takes_value(true)
-                .help("vdp (van-der-pol) or mp (mathematical pendulum)"),
+                .help("vdp (van-der-pol, with x0 v0 eta a omega0) or nvdp (normalized van-der-pol, with epsilon x0 v0)"),
         )
         .arg(
             Arg::with_name("step")
@@ -180,12 +207,14 @@ fn main() {
         .arg(Arg::with_name("omega0").long("omega0").takes_value(true))
         .arg(Arg::with_name("eta").long("eta").takes_value(true))
         .arg(Arg::with_name("a").long("a").takes_value(true))
+        .arg(Arg::with_name("epsilon").long("epsilon").takes_value(true))
         .get_matches();
 
     let typ = getarg(&matches, "type", "vdp".to_string());
     let time = getarg(&matches, "time", 0.5);
     let step = getarg(&matches, "step", 0.001);
     let rounds = (time / step) as usize;
+    let data;
 
     if typ == "vdp" {
         let vdp = VDP {
@@ -195,22 +224,31 @@ fn main() {
             a: getarg(&matches, "a", 3.),
             omega0: getarg(&matches, "omega0", 20.),
         };
-        let data = drive(&vdp, step, rounds);
-        let out = getarg(&matches, "out-phase", "".to_string());
-        if !out.is_empty() && out.ends_with("svg") {
-            render_phasespace(data, &out).unwrap();
-        } else if !out.is_empty() && out.ends_with("dat") {
-            let mut file = fs::OpenOptions::new()
-                .truncate(true)
-                .write(true)
-                .create(true)
-                .open(out)
-                .unwrap();
-            data.print_phase_tsv(&mut file);
-        } else {
-            println!("Specify --out-phase to render the phase space");
-        }
+        data = drive(&vdp, step, rounds);
+    } else if typ == "nvdp" {
+        let nvdp = NormalizedVDP {
+            x0: getarg(&matches, "x0", 1.),
+            v0: getarg(&matches, "v0", 0.),
+            epsilon: getarg(&matches, "epsilon", 0.),
+        };
+        data = drive(&nvdp, step, rounds);
     } else {
         unimplemented!()
+    }
+
+    let out = getarg(&matches, "out-phase", "".to_string());
+
+    if !out.is_empty() && out.ends_with("svg") {
+        render_phasespace(data, &out).unwrap();
+    } else if !out.is_empty() && out.ends_with("dat") {
+        let mut file = fs::OpenOptions::new()
+            .truncate(true)
+            .write(true)
+            .create(true)
+            .open(out)
+            .unwrap();
+        data.print_phase_tsv(&mut file);
+    } else {
+        println!("Specify --out-phase to render the phase space");
     }
 }
