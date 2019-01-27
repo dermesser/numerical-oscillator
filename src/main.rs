@@ -1,11 +1,6 @@
 use clap::{App, Arg};
-
-use plotlib;
-use plotlib::scatter::{Scatter, Style};
-use plotlib::style::Point;
-use plotlib::view::View;
-
-use svg;
+use gnuplot;
+use gnuplot::{AxesCommon, Figure, PlotOption};
 
 use std::f64;
 use std::fs;
@@ -168,33 +163,41 @@ fn drive<S: SolverIterator>(it: &S, step: f64, rounds: usize) -> CollectedData {
     return collected;
 }
 
+// Driver for rendering data using gnuplot.
 fn render_phasespace(cd: CollectedData, dst: &str) -> io::Result<()> {
-    let (xmin, xmax) = cd.x.iter().fold((f64::MAX, f64::MIN), |(min, max), x| {
-        (
-            if *x < min { *x } else { min },
-            if *x > max { *x } else { max },
+    let mut figure = Figure::new();
+    let axesopts = [
+        PlotOption::LineStyle(gnuplot::DashType::Solid),
+        PlotOption::LineWidth(1.),
+    ];
+    figure.set_terminal("pngcairo size 1920, 1080", dst);
+    figure
+        .axes2d()
+        .set_x_axis(true, &axesopts)
+        .set_y_axis(true, &axesopts)
+        .lines(
+            cd.x.iter(),
+            cd.v.iter(),
+            &[
+                PlotOption::LineStyle(gnuplot::DashType::Solid),
+                PlotOption::LineWidth(2.),
+                PlotOption::Color("red"),
+            ],
         )
-    });
-    let (ymin, ymax) = cd.v.iter().fold((f64::MAX, f64::MIN), |(min, max), x| {
-        (
-            if *x < min { *x } else { min },
-            if *x > max { *x } else { max },
-        )
-    });
-    println!("x: {:?} v: {:?}", (xmin, xmax), (ymin, ymax));
+        .set_x_grid(true)
+        .set_x_label("X / Phi", &[])
+        .set_y_grid(true)
+        .set_y_label("V / d/dtPhi", &[])
+        .set_grid_options(
+            false,
+            &[
+                PlotOption::LineStyle(gnuplot::DashType::Dash),
+                PlotOption::LineWidth(1.),
+                PlotOption::Color("gray"),
+            ],
+        );
+    figure.show();
 
-    let x = cd.x.into_iter();
-    let v = cd.v.into_iter();
-    let zipped: Vec<(f64, f64)> = x.zip(v).collect();
-    let scatter = Scatter::from_vec(&zipped).style(Style::new().colour("#FF0000").size(1.));
-
-    let group = View::new()
-        .add(&scatter)
-        .x_range(xmin, xmax)
-        .y_range(ymin, ymax)
-        .x_label("X")
-        .y_label("V");
-    plotlib::page::Page::single(&group).save(dst);
     Ok(())
 }
 
@@ -279,7 +282,7 @@ fn main() {
         };
         data = drive(&nvdp, step, rounds);
     } else if typ == "chaoticpendulum" {
-        let cdp = ChaoticDrivenPendulum{
+        let cdp = ChaoticDrivenPendulum {
             phi0: getarg(&matches, "x0", 0.1),
             vphi0: getarg(&matches, "v0", 0.),
             r: getarg(&matches, "r", 1.),
@@ -295,7 +298,7 @@ fn main() {
 
     let out = getarg(&matches, "out-phase", "".to_string());
 
-    if !out.is_empty() && out.ends_with("svg") {
+    if !out.is_empty() && out.ends_with("png") {
         render_phasespace(data, &out).unwrap();
     } else if !out.is_empty() && out.ends_with("dat") {
         let mut file = fs::OpenOptions::new()
@@ -306,6 +309,6 @@ fn main() {
             .unwrap();
         data.print_phase_tsv(&mut file);
     } else {
-        println!("Specify --out-phase to render the phase space");
+        println!("Specify --out-phase to render the phase space. Supported formats are .dat (TSV) and .png");
     }
 }
