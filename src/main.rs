@@ -164,7 +164,7 @@ fn drive<S: SolverIterator>(it: &S, step: f64, rounds: usize) -> CollectedData {
 }
 
 // Driver for rendering data using gnuplot.
-fn render_phasespace(cd: CollectedData, dst: &str) -> io::Result<()> {
+fn render_phasespace(cd: &CollectedData, dst: &str) -> io::Result<()> {
     let mut figure = Figure::new();
     let axesopts = [
         PlotOption::LineStyle(gnuplot::DashType::Solid),
@@ -198,6 +198,60 @@ fn render_phasespace(cd: CollectedData, dst: &str) -> io::Result<()> {
         );
     figure.show();
 
+    Ok(())
+}
+
+fn render_xvt(cd: &CollectedData, dst: &str) -> io::Result<()> {
+    let mut figure = Figure::new();
+    let axesopts = [
+        PlotOption::LineStyle(gnuplot::DashType::Solid),
+        PlotOption::LineWidth(1.),
+    ];
+
+    figure.set_terminal("pngcairo size 1920, 1080", dst);
+    figure
+        .axes2d()
+        .set_x_axis(true, &axesopts)
+        .set_y_axis(true, &axesopts)
+        .lines(
+            (0..cd.x.len()).map(|t| t as f64 * cd.step),
+            cd.x.iter(),
+            &[
+                PlotOption::Caption("x(t)"),
+                PlotOption::LineStyle(gnuplot::DashType::Solid),
+                PlotOption::LineWidth(2.),
+                PlotOption::Color("red"),
+            ],
+        )
+        .lines(
+            (0..cd.x.len()).map(|t| t as f64 * cd.step),
+            cd.v.iter(),
+            &[
+                PlotOption::Caption("v(t)"),
+                PlotOption::LineStyle(gnuplot::DashType::Solid),
+                PlotOption::LineWidth(2.),
+                PlotOption::Color("blue"),
+            ],
+        )
+        .set_x_grid(true)
+        .set_x_label("X / Phi", &[])
+        .set_y_grid(true)
+        .set_y_label("V / d/dtPhi", &[])
+        .set_grid_options(
+            false,
+            &[
+                PlotOption::LineStyle(gnuplot::DashType::Dash),
+                PlotOption::LineWidth(1.),
+                PlotOption::Color("gray"),
+            ],
+        )
+        .set_legend(
+            gnuplot::Coordinate::Graph(0.8),
+            gnuplot::Coordinate::Graph(0.8),
+            &[],
+            &[],
+        );
+    figure.show();
     Ok(())
 }
 
@@ -297,9 +351,14 @@ fn main() {
     }
 
     let out = getarg(&matches, "out-phase", "".to_string());
+    let out_xvt = getarg(&matches, "out-xvt", "".to_string());
+
+    if !out_xvt.is_empty() && out_xvt.ends_with("png") {
+        render_xvt(&data, &out_xvt).unwrap();
+    }
 
     if !out.is_empty() && out.ends_with("png") {
-        render_phasespace(data, &out).unwrap();
+        render_phasespace(&data, &out).unwrap();
     } else if !out.is_empty() && out.ends_with("dat") {
         let mut file = fs::OpenOptions::new()
             .truncate(true)
@@ -308,7 +367,8 @@ fn main() {
             .open(out)
             .unwrap();
         data.print_phase_tsv(&mut file);
-    } else {
-        println!("Specify --out-phase to render the phase space. Supported formats are .dat (TSV) and .png");
     }
+
+    println!("Specify --out-phase to render the phase space. Supported formats are .dat (TSV) and .png. The .dat file contains all coordinates.");
+    println!("Specify --out-xvt to render a x/v diagram. Supported format is .png");
 }
