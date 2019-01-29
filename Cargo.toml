@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 clap = "2.32"
 gnuplot = "0.0"
+termion = "1.5"

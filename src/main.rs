@@ -1,6 +1,7 @@
 use clap::{App, Arg};
 use gnuplot;
 use gnuplot::{AxesCommon, Figure, PlotOption};
+use termion;
 
 use std::f64;
 use std::fs;
@@ -255,6 +256,40 @@ fn render_xvt(cd: &CollectedData, dst: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn render_realtime_terminal(cd: &CollectedData) {
+    let step = std::time::Duration::from_micros((cd.step * 1e6) as u64);
+    if !termion::is_tty(&io::stdout()) {
+        return;
+    }
+    let (ydim, xdim) = termion::terminal_size().unwrap();
+    let xmin =
+        cd.x.iter()
+            .fold(f64::MAX, |min, &next| if next < min { next } else { min });
+    let xmax =
+        cd.x.iter()
+            .fold(f64::MIN, |max, &next| if next > max { next } else { max });
+    let mid = ((xmin.abs() / (xmin.abs() + xmax.abs())) * xdim as f64) as u16;
+    //println!("dim: {} mid: {} min: {} max: {}", xdim, mid, xmin, xmax);
+    println!("");
+    for &x in &cd.x {
+        let scaled;
+        if x < 0. {
+            scaled = mid - ((x / xmin) * mid as f64) as u16;
+        } else {
+            scaled = (mid as f64 + (x / xmax) * (xdim - mid) as f64) as u16;
+        }
+        print!(
+            "{}{}x",
+            termion::clear::CurrentLine,
+            termion::cursor::Goto(scaled, ydim)
+        );
+        use std::io::Write;
+        io::stdout().flush();
+        std::thread::sleep(5 * step);
+    }
+    println!("");
+}
+
 fn getarg<T: std::str::FromStr + std::string::ToString>(
     m: &clap::ArgMatches,
     name: &str,
@@ -300,6 +335,12 @@ fn main() {
                 .takes_value(true)
                 .help("output file for x-v-t diagram"),
         )
+        .arg(
+            Arg::with_name("simulate")
+            .long("simulate")
+            .takes_value(true)
+            .help("run a simulation on the terminal")
+            )
         .arg(Arg::with_name("a").long("a").takes_value(true))
         .arg(Arg::with_name("epsilon").long("epsilon").takes_value(true))
         .arg(Arg::with_name("eta").long("eta").takes_value(true))
@@ -367,6 +408,9 @@ fn main() {
             .open(out)
             .unwrap();
         data.print_phase_tsv(&mut file);
+    }
+    if getarg(&matches, "simulate", false) {
+        render_realtime_terminal(&data);
     }
 
     println!("Specify --out-phase to render the phase space. Supported formats are .dat (TSV) and .png. The .dat file contains all coordinates.");
